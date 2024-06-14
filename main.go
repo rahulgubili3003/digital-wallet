@@ -20,22 +20,21 @@ func (r *Repository) CreateWallet(ctx *fiber.Ctx) error {
 
 	fmt.Println("Create Wallet")
 
-	request := handlers.WalletCreateRequest{}
-
-	entity := model.Wallet{
-		UserId:    request.UserId,
-		Balance:   0.0,
-		IsDeleted: false,
-	}
+	var request handlers.WalletCreateRequest
 
 	err := ctx.BodyParser(&request)
-
 	if err != nil {
 		err := ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Failed to Parse request Body"})
 		if err != nil {
 			return err
 		}
+	}
+
+	entity := model.Wallet{
+		UserId:    request.UserId,
+		Balance:   0.0,
+		IsDeleted: false,
 	}
 
 	if err != nil {
@@ -83,8 +82,6 @@ func main() {
 	}
 
 	err = model.MigrateWallet(db)
-
-	fmt.Println("Automigrated")
 
 	if err != nil {
 		log.Fatal("Could not migrate DB")
