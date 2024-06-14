@@ -59,6 +59,16 @@ func (r *Repository) CreateWallet(ctx *fiber.Ctx) error {
 	return nil
 }
 
+func (r *Repository) TopUp(ctx *fiber.Ctx) error {
+	return nil
+}
+
+func (r *Repository) setupRoutes(app *fiber.App) {
+	api := app.Group("/api/v1")
+	api.Post("/create-wallet", r.CreateWallet)
+	api.Post("/top-up", r.TopUp)
+}
+
 func main() {
 
 	err := godotenv.Load(".env")
@@ -92,9 +102,7 @@ func main() {
 	}
 
 	app := fiber.New()
-	api := app.Group("/api/v1")
-	api.Post("/create-wallet", r.CreateWallet)
-
+	r.setupRoutes(app)
 	err = app.Listen(":3000")
 	if err != nil {
 		log.Fatal("Could not start the Server")
