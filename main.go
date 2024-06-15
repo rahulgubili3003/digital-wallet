@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gofiber/fiber/v2"
-	"github.com/joho/godotenv"
 	"github.com/rahulgubili3003/digital-wallet/client"
 	"github.com/rahulgubili3003/digital-wallet/handlers"
 	"github.com/rahulgubili3003/digital-wallet/model"
+	"github.com/rahulgubili3003/digital-wallet/repository"
 	"gorm.io/gorm"
 	"log"
 	"net/http"
@@ -20,46 +20,26 @@ type Repository struct {
 }
 
 func (r *Repository) CreateWallet(ctx *fiber.Ctx) error {
-
 	fmt.Println("Create Wallet")
-
 	var request handlers.WalletCreateRequest
 
-	err := ctx.BodyParser(&request)
-	if err != nil {
-		err := ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+	if err := ctx.BodyParser(&request); err != nil {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Failed to Parse request Body"})
-		if err != nil {
-			return err
-		}
 	}
-
+	// Build entity
 	entity := model.Wallet{
 		UserId:    request.UserId,
 		Balance:   0.0,
 		IsDeleted: false,
 	}
 
-	if err != nil {
-		panic(err)
-	}
-
-	err = r.DB.Create(&entity).Error
-
-	if err != nil {
-		err := ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+	if err := r.DB.Create(&entity).Error; err != nil {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Could not create Wallet"})
-		if err != nil {
-			return err
-		}
 	}
-
-	err = ctx.Status(fiber.StatusOK).JSON(&fiber.Map{
+	return ctx.Status(fiber.StatusOK).JSON(&fiber.Map{
 		"message": "Successfully created"})
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 type TopUpRequest struct {
@@ -68,24 +48,16 @@ type TopUpRequest struct {
 }
 
 func (r *Repository) TopUp(ctx *fiber.Ctx) error {
-
 	topUp := TopUpRequest{}
-
 	if err := ctx.BodyParser(&topUp); err != nil {
 		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Failed to Parse the Request"})
 	}
-
 	wallet, err := r.findWalletByUserId(topUp.UserId)
-
 	if err != nil {
-		err := ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Could not find Wallet"})
-		if err != nil {
-			return err
-		}
 	}
-
 	existingBal := wallet.Balance
 	newBal := existingBal + topUp.TopUpAmount
 
@@ -100,7 +72,6 @@ func (r *Repository) TopUp(ctx *fiber.Ctx) error {
 			"message": "Failed to update wallet balance",
 		})
 	}
-
 	return ctx.Status(fiber.StatusOK).JSON(&fiber.Map{
 		"message":   "Top up successful",
 		"wallet_id": wallet.WalletId,
@@ -120,7 +91,6 @@ func (r *Repository) findWalletByUserId(userId uint) (*model.Wallet, error) {
 			return nil, result.Error
 		}
 	}
-
 	return &wallet, nil
 }
 
@@ -132,19 +102,8 @@ func (r *Repository) setupRoutes(app *fiber.App) {
 
 func main() {
 
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Fatal("Failed to Load Properties")
-	}
-
-	config := &client.Config{
-		Host:     os.Getenv("DB_HOST"),
-		Port:     os.Getenv("DB_PORT"),
-		User:     os.Getenv("DB_USER"),
-		Password: os.Getenv("DB_PASSWORD"),
-		DBName:   os.Getenv("DB_NAME"),
-		SSLMode:  os.Getenv("DB_SSLMODE"),
-	}
+	// Initialise the DB Connection
+	config := repository.Init()
 
 	db, err := client.ConnectDatabase(config)
 
@@ -162,9 +121,10 @@ func main() {
 		DB: db,
 	}
 
+	// Setup web server
 	app := fiber.New()
 	r.setupRoutes(app)
-	err = app.Listen(":3000")
+	err = app.Listen(os.Getenv("APP_PORT"))
 	if err != nil {
 		log.Fatal("Could not start the Server")
 	}
