@@ -83,7 +83,6 @@ type Wallets struct {
 	Balance  float64 `json:"balance"`
 }
 
-// Define the response structure
 type WalletResponse struct {
 	Wallets []Wallets `json:"wallet_info"`
 }
@@ -94,9 +93,7 @@ func (r *Repository) getAllWalletInfo(ctx *fiber.Ctx) error {
 		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Wallets Could Not be Retrieved"})
 	}
-
 	response := WalletResponse{Wallets: wallets}
-
 	return ctx.Status(fiber.StatusOK).JSON(response)
 }
 
@@ -124,26 +121,19 @@ func (r *Repository) setupRoutes(app *fiber.App) {
 }
 
 func main() {
-
 	// Initialise the DB Connection
 	config := repository.Init()
-
 	db, err := client.ConnectDatabase(config)
-
 	if err != nil {
 		log.Fatal("Db Connection Failed")
 	}
-
 	err = model.MigrateWallet(db)
-
 	if err != nil {
 		log.Fatal("Could not migrate DB")
 	}
-
 	r := Repository{
 		DB: db,
 	}
-
 	// Setup web server
 	app := fiber.New()
 	r.setupRoutes(app)
