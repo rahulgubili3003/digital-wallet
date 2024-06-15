@@ -78,6 +78,28 @@ func (r *Repository) TopUp(ctx *fiber.Ctx) error {
 		"balance":   wallet.Balance})
 }
 
+type Wallets struct {
+	WalletId uint    `json:"wallet_id"`
+	Balance  float64 `json:"balance"`
+}
+
+// Define the response structure
+type WalletResponse struct {
+	Wallets []Wallets `json:"wallet_info"`
+}
+
+func (r *Repository) getAllWalletInfo(ctx *fiber.Ctx) error {
+	var wallets []Wallets
+	if err := r.DB.Select("wallet_id", "balance").Find(&wallets).Error; err != nil {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+			"message": "Wallets Could Not be Retrieved"})
+	}
+
+	response := WalletResponse{Wallets: wallets}
+
+	return ctx.Status(fiber.StatusOK).JSON(response)
+}
+
 func (r *Repository) findWalletByUserId(userId uint) (*model.Wallet, error) {
 	var wallet model.Wallet
 	result := r.DB.Where("user_id =?", userId).First(&wallet)
@@ -98,6 +120,7 @@ func (r *Repository) setupRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 	api.Post("/create-wallet", r.CreateWallet)
 	api.Post("/top-up", r.TopUp)
+	api.Get("/wallet-info/all", r.getAllWalletInfo)
 }
 
 func main() {
