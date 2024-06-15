@@ -18,13 +18,11 @@ func main() {
 		log.Fatal("Db Connection Failed")
 	}
 
-	err = model.MigrateWallet(db)
-	if err != nil {
+	if err := model.MigrateWallet(db); err != nil {
 		log.Fatal("Could not migrate Wallet DB")
 	}
 
-	err = model.AutoMigrateTransactionsDB(db)
-	if err != nil {
+	if err := model.AutoMigrateTransactionsDB(db); err != nil {
 		log.Fatal("Could not migrate Transactions DB")
 	}
 
@@ -34,8 +32,7 @@ func main() {
 	// Setup web server
 	app := fiber.New()
 	r.SetupRoutes(app)
-	err = app.Listen(os.Getenv("APP_PORT"))
-	if err != nil {
+	if err := app.Listen(os.Getenv("APP_PORT")); err != nil {
 		log.Fatal("Could not start the Server")
 	}
 }
