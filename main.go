@@ -78,6 +78,104 @@ func (r *Repository) TopUp(ctx *fiber.Ctx) error {
 		"balance":   wallet.Balance})
 }
 
+type TransferAmount struct {
+	UserId          uint    `json:"user_id"`
+	Amount          float64 `json:"amount"`
+	RecipientUserId uint    `json:"recipient_user_id"`
+}
+
+func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
+	var userWallet model.Wallet
+	var recipientWallet model.Wallet
+	const query = "user_id =?"
+	requestBody := &TransferAmount{}
+
+	if err := ctx.BodyParser(requestBody); err != nil {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+			"message": "Could not parse request Body"})
+	}
+
+	userId := requestBody.UserId
+	amount := requestBody.Amount
+	recipientUserId := requestBody.RecipientUserId
+
+	if amount <= 0 {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+			"message": "Transfer Amount is invalid. Only positive amount is valid."})
+	}
+	userWalletInfo := r.DB.Where(query, userId).First(&userWallet).Error
+
+	if userWalletInfo != nil {
+		if errors.Is(userWalletInfo, gorm.ErrRecordNotFound) {
+			// No wallet found for the given user_id
+			return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+				"message":   "Sender user Id is invalid",
+				"sender_id": userId,
+			})
+		} else {
+			// Some other error occurred
+			log.Printf("Error Occurred while retrieving wallet Info :%s", userWalletInfo)
+			return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
+				"message": "Internal Error",
+				"reason":  "Failed to fetch Wallet Details"})
+		}
+	}
+
+	recipientWalletInfo := r.DB.Where(query, recipientUserId).First(&recipientWallet).Error
+
+	if recipientWalletInfo != nil {
+		if errors.Is(recipientWalletInfo, gorm.ErrRecordNotFound) {
+			// No wallet found for the given user_id
+			return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+				"message":   "Recipient user Id is invalid",
+				"sender_id": recipientUserId,
+			})
+		} else {
+			// Some other error occurred
+			log.Printf("Error Occurred while retrieving wallet Info :%s", recipientWalletInfo)
+			return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
+				"message": "Internal Error",
+				"reason":  "Failed to fetch Wallet Details"})
+		}
+	}
+
+	existingUserBal := userWallet.Balance
+	deductedUserBal := existingUserBal - requestBody.Amount
+
+	if deductedUserBal < 0 {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
+			"message": "Sender Balance insufficient"})
+	}
+
+	result := r.DB.Model(&userWallet).Where("wallet_id =? AND user_id =?", userWallet.WalletId, userWallet.UserId).Updates(map[string]interface{}{
+		"balance":    deductedUserBal,
+		"updated_at": time.Now(),
+	})
+
+	if result.Error != nil {
+		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
+			"message": "Could not start the Money Transfer"})
+	}
+
+	existingRecipientBal := recipientWallet.Balance
+	updatedRecipientBal := existingRecipientBal + requestBody.Amount
+
+	recipientResult := r.DB.Model(&recipientWallet).Where("wallet_id =? AND user_id =?", recipientWallet.WalletId, recipientWallet.UserId).Updates(map[string]interface{}{
+		"balance":    updatedRecipientBal,
+		"updated_at": time.Now(),
+	})
+
+	if recipientResult.Error != nil {
+		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
+			"message": "Could not complete the Money transfer"})
+	}
+
+	return ctx.Status(fiber.StatusOK).JSON(&fiber.Map{
+		"message":      "Wallet Transferred success",
+		"sender_id":    userWallet.UserId,
+		"recipient_id": recipientWallet.UserId})
+}
+
 type Wallets struct {
 	WalletId uint    `json:"wallet_id"`
 	Balance  float64 `json:"balance"`
@@ -118,6 +216,7 @@ func (r *Repository) setupRoutes(app *fiber.App) {
 	api.Post("/create-wallet", r.CreateWallet)
 	api.Post("/top-up", r.TopUp)
 	api.Get("/wallet-info/all", r.getAllWalletInfo)
+	api.Post("/transfer", r.transferAmount)
 }
 
 func main() {
