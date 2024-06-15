@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rahulgubili3003/digital-wallet/client"
+	"github.com/rahulgubili3003/digital-wallet/constants"
 	"github.com/rahulgubili3003/digital-wallet/handlers"
 	"github.com/rahulgubili3003/digital-wallet/model"
 	"github.com/rahulgubili3003/digital-wallet/repository"
@@ -49,6 +50,7 @@ type TopUpRequest struct {
 
 func (r *Repository) TopUp(ctx *fiber.Ctx) error {
 	topUp := TopUpRequest{}
+
 	if err := ctx.BodyParser(&topUp); err != nil {
 		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Failed to Parse the Request"})
@@ -60,8 +62,7 @@ func (r *Repository) TopUp(ctx *fiber.Ctx) error {
 	}
 	existingBal := wallet.Balance
 	newBal := existingBal + topUp.TopUpAmount
-
-	result := r.DB.Model(&wallet).Where("wallet_id =? AND user_id =?", wallet.WalletId, wallet.UserId).Updates(map[string]interface{}{
+	result := r.DB.Model(&wallet).Where(constants.WalletAndUserIdQuery, wallet.WalletId, wallet.UserId).Updates(map[string]interface{}{
 		"balance":    newBal,
 		"updated_at": time.Now(),
 	})
@@ -87,7 +88,7 @@ type TransferAmount struct {
 func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
 	var userWallet model.Wallet
 	var recipientWallet model.Wallet
-	const query = "user_id =?"
+
 	requestBody := &TransferAmount{}
 
 	if err := ctx.BodyParser(requestBody); err != nil {
@@ -103,7 +104,7 @@ func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
 		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
 			"message": "Transfer Amount is invalid. Only positive amount is valid."})
 	}
-	userWalletInfo := r.DB.Where(query, userId).First(&userWallet).Error
+	userWalletInfo := r.DB.Where(constants.UserIdQuery, userId).First(&userWallet).Error
 
 	if userWalletInfo != nil {
 		if errors.Is(userWalletInfo, gorm.ErrRecordNotFound) {
@@ -121,7 +122,7 @@ func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
 		}
 	}
 
-	recipientWalletInfo := r.DB.Where(query, recipientUserId).First(&recipientWallet).Error
+	recipientWalletInfo := r.DB.Where(constants.UserIdQuery, recipientUserId).First(&recipientWallet).Error
 
 	if recipientWalletInfo != nil {
 		if errors.Is(recipientWalletInfo, gorm.ErrRecordNotFound) {
@@ -147,7 +148,7 @@ func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
 			"message": "Sender Balance insufficient"})
 	}
 
-	result := r.DB.Model(&userWallet).Where("wallet_id =? AND user_id =?", userWallet.WalletId, userWallet.UserId).Updates(map[string]interface{}{
+	result := r.DB.Model(&userWallet).Where(constants.WalletAndUserIdQuery, userWallet.WalletId, userWallet.UserId).Updates(map[string]interface{}{
 		"balance":    deductedUserBal,
 		"updated_at": time.Now(),
 	})
@@ -160,7 +161,7 @@ func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
 	existingRecipientBal := recipientWallet.Balance
 	updatedRecipientBal := existingRecipientBal + requestBody.Amount
 
-	recipientResult := r.DB.Model(&recipientWallet).Where("wallet_id =? AND user_id =?", recipientWallet.WalletId, recipientWallet.UserId).Updates(map[string]interface{}{
+	recipientResult := r.DB.Model(&recipientWallet).Where(constants.WalletAndUserIdQuery, recipientWallet.WalletId, recipientWallet.UserId).Updates(map[string]interface{}{
 		"balance":    updatedRecipientBal,
 		"updated_at": time.Now(),
 	})
@@ -168,6 +169,17 @@ func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
 	if recipientResult.Error != nil {
 		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
 			"message": "Could not complete the Money transfer"})
+	}
+
+	transactionEntity := model.Transactions{
+		SenderId:          userWallet.UserId,
+		RecipientId:       recipientWallet.UserId,
+		AmountTransferred: amount,
+	}
+
+	if err := r.DB.Create(&transactionEntity).Error; err != nil {
+		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
+			"message": "Could not register the Transaction Record in the DB"})
 	}
 
 	return ctx.Status(fiber.StatusOK).JSON(&fiber.Map{
@@ -226,10 +238,17 @@ func main() {
 	if err != nil {
 		log.Fatal("Db Connection Failed")
 	}
+
 	err = model.MigrateWallet(db)
 	if err != nil {
-		log.Fatal("Could not migrate DB")
+		log.Fatal("Could not migrate Wallet DB")
 	}
+
+	err = model.AutoMigrateTransactionsDB(db)
+	if err != nil {
+		log.Fatal("Could not migrate Transactions DB")
+	}
+
 	r := Repository{
 		DB: db,
 	}
