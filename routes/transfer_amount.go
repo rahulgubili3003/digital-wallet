@@ -2,114 +2,109 @@ package routes
 
 import (
 	"errors"
+	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rahulgubili3003/digital-wallet/constants"
 	"github.com/rahulgubili3003/digital-wallet/dto/request"
+	"github.com/rahulgubili3003/digital-wallet/middleware"
 	"github.com/rahulgubili3003/digital-wallet/model"
 	"gorm.io/gorm"
-	"log"
 	"time"
 )
 
 func (r *Repository) transferAmount(ctx *fiber.Ctx) error {
-	var userWallet model.Wallet
-	var recipientWallet model.Wallet
-
-	requestBody := &request.TransferAmount{}
-
-	if err := ctx.BodyParser(requestBody); err != nil {
-		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
-			"message": "Could not parse request Body"})
+	token, err := middleware.Authorization(ctx)
+	if err != nil {
+		return err
+	}
+	_, err, _ = r.validateJwt(ctx, nil, token) // Assuming validation doesn't change based on previous errors
+	if err != nil {
+		return err
 	}
 
-	userId := requestBody.UserId
-	amount := requestBody.Amount
-	recipientUserId := requestBody.RecipientUserId
-
-	if amount <= 0 {
-		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
-			"message": "Transfer Amount is invalid. Only positive amount is valid."})
-	}
-	userWalletInfo := r.DB.Where(constants.UserIdQuery, userId).First(&userWallet).Error
-
-	if userWalletInfo != nil {
-		if errors.Is(userWalletInfo, gorm.ErrRecordNotFound) {
-			// No wallet found for the given user_id
-			return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
-				"message":   "Sender user Id is invalid",
-				"sender_id": userId,
-			})
-		} else {
-			// Some other error occurred
-			log.Printf("Error Occurred while retrieving wallet Info :%s", userWalletInfo)
-			return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
-				"message": "Internal Error",
-				"reason":  "Failed to fetch Wallet Details"})
-		}
+	var requestBody request.TransferAmount
+	if err := ctx.BodyParser(&requestBody); err != nil {
+		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{"message": "Could not parse request Body"})
 	}
 
-	recipientWalletInfo := r.DB.Where(constants.UserIdQuery, recipientUserId).First(&recipientWallet).Error
-
-	if recipientWalletInfo != nil {
-		if errors.Is(recipientWalletInfo, gorm.ErrRecordNotFound) {
-			// No wallet found for the given user_id
-			return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
-				"message":   "Recipient user Id is invalid",
-				"sender_id": recipientUserId,
-			})
-		} else {
-			// Some other error occurred
-			log.Printf("Error Occurred while retrieving wallet Info :%s", recipientWalletInfo)
-			return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
-				"message": "Internal Error",
-				"reason":  "Failed to fetch Wallet Details"})
-		}
+	userWallet, recipientWallet, err := r.fetchWallets(requestBody.UserId, requestBody.RecipientUserId)
+	if err != nil {
+		return err
 	}
 
-	existingUserBal := userWallet.Balance
-	deductedUserBal := existingUserBal - requestBody.Amount
-
-	if deductedUserBal < 0 {
-		return ctx.Status(fiber.StatusBadRequest).JSON(&fiber.Map{
-			"message": "Sender Balance insufficient"})
+	if err := r.performBalanceUpdate(userWallet, recipientWallet, requestBody.Amount); err != nil {
+		return err
 	}
 
-	result := r.DB.Model(&userWallet).Where(constants.WalletAndUserIdQuery, userWallet.WalletId, userWallet.UserId).Updates(map[string]interface{}{
-		"balance":    deductedUserBal,
-		"updated_at": time.Now(),
-	})
-
-	if result.Error != nil {
-		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
-			"message": "Could not start the Money Transfer"})
-	}
-
-	existingRecipientBal := recipientWallet.Balance
-	updatedRecipientBal := existingRecipientBal + requestBody.Amount
-
-	recipientResult := r.DB.Model(&recipientWallet).Where(constants.WalletAndUserIdQuery, recipientWallet.WalletId, recipientWallet.UserId).Updates(map[string]interface{}{
-		"balance":    updatedRecipientBal,
-		"updated_at": time.Now(),
-	})
-
-	if recipientResult.Error != nil {
-		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
-			"message": "Could not complete the Money transfer"})
-	}
-
-	transactionEntity := model.Transactions{
-		SenderId:          userWallet.UserId,
-		RecipientId:       recipientWallet.UserId,
-		AmountTransferred: amount,
-	}
-
-	if err := r.DB.Create(&transactionEntity).Error; err != nil {
-		return ctx.Status(fiber.StatusInternalServerError).JSON(&fiber.Map{
-			"message": "Could not register the Transaction Record in the DB"})
+	if err := r.createTransaction(userWallet, recipientWallet, requestBody.Amount); err != nil {
+		return err
 	}
 
 	return ctx.Status(fiber.StatusOK).JSON(&fiber.Map{
 		"message":      "Wallet Transferred success",
 		"sender_id":    userWallet.UserId,
-		"recipient_id": recipientWallet.UserId})
+		"recipient_id": recipientWallet.UserId,
+	})
+}
+
+// Helper functions for fetching wallets, performing balance updates, and creating transactions would go here.
+func (r *Repository) fetchWallets(senderID uint, recipientID uint) (*model.Wallet, *model.Wallet, error) {
+	var senderWallet, recipientWallet model.Wallet
+
+	// Fetch sender's wallet
+	if err := r.DB.Where("user_id =?", senderID).First(&senderWallet).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, fmt.Errorf("wallet not found for sender ID: %s", senderID)
+		}
+		return nil, nil, err
+	}
+
+	// Fetch recipient's wallet
+	if err := r.DB.Where("user_id =?", recipientID).First(&recipientWallet).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, fmt.Errorf("wallet not found for recipient ID: %s", recipientID)
+		}
+		return nil, nil, err
+	}
+
+	return &senderWallet, &recipientWallet, nil
+}
+
+func (r *Repository) performBalanceUpdate(senderWallet *model.Wallet, recipientWallet *model.Wallet, amount float64) error {
+	// Deduct from sender's balance
+	newSenderBalance := senderWallet.Balance - amount
+	if newSenderBalance < 0 {
+		return fmt.Errorf("insufficient funds")
+	}
+
+	// Add to recipient's balance
+	newRecipientBalance := recipientWallet.Balance + amount
+
+	// Update balances
+	if err := r.DB.Model(&senderWallet).Where(constants.WalletAndUserIdQuery, senderWallet.WalletId, senderWallet.UserId).Updates(map[string]interface{}{
+		"balance":    newSenderBalance,
+		"updated_at": time.Now(),
+	}).Error; err != nil {
+		return err
+	}
+
+	if err := r.DB.Model(&recipientWallet).Where(constants.WalletAndUserIdQuery, recipientWallet.WalletId, recipientWallet.UserId).Updates(map[string]interface{}{
+		"balance":    newRecipientBalance,
+		"updated_at": time.Now(),
+	}).Error; err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *Repository) createTransaction(senderWallet *model.Wallet, recipientWallet *model.Wallet, amount float64) error {
+	transaction := model.Transactions{
+		SenderId:          senderWallet.UserId,
+		RecipientId:       recipientWallet.UserId,
+		AmountTransferred: amount}
+	if err := r.DB.Create(&transaction).Error; err != nil {
+		return err
+	}
+	return nil
 }
