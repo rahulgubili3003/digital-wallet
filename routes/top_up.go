@@ -66,7 +66,7 @@ func (r *Repository) TopUp(ctx *fiber.Ctx) error {
 
 func (r *Repository) findWalletByUserId(userId uint) (*model.Wallet, error) {
 	var wallet model.Wallet
-	result := r.DB.Where("user_id =?", userId).First(&wallet)
+	result := r.DB.Where(constants.UserIdQuery, userId).First(&wallet)
 
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {

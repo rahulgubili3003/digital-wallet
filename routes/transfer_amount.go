@@ -52,7 +52,7 @@ func (r *Repository) fetchWallets(senderID uint, recipientID uint) (*model.Walle
 	var senderWallet, recipientWallet model.Wallet
 
 	// Fetch sender's wallet
-	if err := r.DB.Where("user_id =?", senderID).First(&senderWallet).Error; err != nil {
+	if err := r.DB.Where(constants.UserIdQuery, senderID).First(&senderWallet).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, fmt.Errorf("wallet not found for sender ID: %s", senderID)
 		}
@@ -60,7 +60,7 @@ func (r *Repository) fetchWallets(senderID uint, recipientID uint) (*model.Walle
 	}
 
 	// Fetch recipient's wallet
-	if err := r.DB.Where("user_id =?", recipientID).First(&recipientWallet).Error; err != nil {
+	if err := r.DB.Where(constants.UserIdQuery, recipientID).First(&recipientWallet).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, fmt.Errorf("wallet not found for recipient ID: %s", recipientID)
 		}
