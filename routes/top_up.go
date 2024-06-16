@@ -1,18 +1,39 @@
 package routes
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rahulgubili3003/digital-wallet/constants"
 	"github.com/rahulgubili3003/digital-wallet/dto/request"
+	"github.com/rahulgubili3003/digital-wallet/middleware"
 	"github.com/rahulgubili3003/digital-wallet/model"
 	"gorm.io/gorm"
+	"log"
 	"net/http"
 	"time"
 )
 
 func (r *Repository) TopUp(ctx *fiber.Ctx) error {
+	token, err := middleware.Authorization(ctx)
+	if err != nil {
+		return err
+	}
+	body, err, isJwtInvalid := r.validateJwt(ctx, err, token)
+	if isJwtInvalid {
+		return err
+	}
+	var responseData ResponseData
+	err = json.Unmarshal(body, &responseData)
+	if err != nil {
+		log.Fatalf("Failed to Unmarshall: %v", err)
+	}
+	if responseData.Data == false {
+		return ctx.Status(fiber.StatusUnauthorized).JSON(&fiber.Map{
+			"message": "Auth token Invalid"})
+	}
+
 	topUp := request.TopUpRequest{}
 
 	if err := ctx.BodyParser(&topUp); err != nil {

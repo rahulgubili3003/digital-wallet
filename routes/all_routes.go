@@ -9,6 +9,11 @@ type Repository struct {
 	DB *gorm.DB
 }
 
+type ResponseData struct {
+	Ok   bool `json:"ok"`
+	Data bool `json:"data"`
+}
+
 func (r *Repository) SetupRoutes(app *fiber.App) {
 	api := app.Group("/api/v1")
 	api.Post("/create-wallet", r.CreateWallet)
